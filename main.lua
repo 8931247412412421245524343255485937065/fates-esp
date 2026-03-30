@@ -1,23 +1,25 @@
-if (not game:IsLoaded()) then
-    game.Loaded:Wait();
-end
+local gmt = getrawmetatable(game)
+local oldIndex = gmt.__index
+local oldNamecall = gmt.__namecall
+setreadonly(gmt, false)
 
-local UILibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/fatesc/fates-esp/main/ui.lua"))();
+local HS = game:GetService("HttpService")
+local RS = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local Teams = game:GetService("Teams")
+local UIS = game:GetService("UserInputService")
+local GS = game:GetService("GuiService")
+
+local UILibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/fatesc/fates-esp/main/ui.lua"))()
+
+if not game:IsLoaded() then game.Loaded:Wait() end
 
 local PlaceId = game.PlaceId
-
-local Players = game:GetService("Players");
-local HttpService = game:GetService("HttpService");
-local Workspace = game:GetService("Workspace");
-local Teams = game:GetService("Teams")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService");
-
 local CurrentCamera = Workspace.CurrentCamera
 local WorldToViewportPoint = CurrentCamera.WorldToViewportPoint
 local GetPartsObscuringTarget = CurrentCamera.GetPartsObscuringTarget
-
-local Inset = game:GetService("GuiService"):GetGuiInset().Y
+local Inset = GS:GetGuiInset().Y
 
 local FindFirstChild = game.FindFirstChild
 local FindFirstChildWhichIsA = game.FindFirstChildWhichIsA
@@ -26,14 +28,12 @@ local Vector2new = Vector2.new
 local Vector3new = Vector3.new
 local CFramenew = CFrame.new
 local Color3new = Color3.new
-
 local Tfind = table.find
 local create = table.create
 local format = string.format
 local floor = math.floor
 local gsub = string.gsub
 local sub = string.sub
-local lower = string.lower
 local upper = string.upper
 local random = math.random
 
@@ -48,8 +48,8 @@ local DefaultSettings = {
         TeamColors = true,
         Thickness = 1.5,
         TracerThickness = 1.6,
-        Transparency = .9,
-        TracerTrancparency = .7,
+        Transparency = 0.9,
+        TracerTrancparency = 0.7,
         Size = 16,
         RenderDistance = 9e9,
         Color = Color3.fromRGB(19, 130, 226),
@@ -77,174 +77,145 @@ local DefaultSettings = {
         SilentAimRedirect = "Head",
         BlacklistedTeams = {}
     },
-    WindowPosition = UDim2.new(0.5, -200, 0.5, -139);
-
+    WindowPosition = UDim2.new(0.5, -200, 0.5, -139),
     Version = 1.2
 }
 
-local EncodeConfig, DecodeConfig;
-do
-    local deepsearchset;
-    deepsearchset = function(tbl, ret, value)
-        if (type(tbl) == 'table') then
-            local new = {}
-            for i, v in next, tbl do
-                new[i] = v
-                if (type(v) == 'table') then
-                    new[i] = deepsearchset(v, ret, value);
-                end
-                if (ret(i, v)) then
-                    new[i] = value(i, v);
-                end
+local deepsearchset
+deepsearchset = function(tbl: {any}, ret: (any, any) -> boolean, value: (any, any) -> any): {any}
+    if type(tbl) == "table" then
+        local new = {}
+        for i, v in next, tbl do
+            new[i] = v
+            if type(v) == "table" then
+                new[i] = deepsearchset(v, ret, value)
             end
-            return new
+            if ret(i, v) then
+                new[i] = value(i, v)
+            end
         end
+        return new
     end
-
-    DecodeConfig = function(Config)
-        local DecodedConfig = deepsearchset(Config, function(Index, Value)
-            return type(Value) == "table" and (Value.HSVColor or Value.Position);
-        end, function(Index, Value)
-            local Color = Value.HSVColor
-            local Position = Value.Position
-            if (Color) then
-                return Color3.fromHSV(Color.H, Color.S, Color.V);
-            end
-            if (Position and Position.Y and Position.X) then
-                return UDim2.new(UDim.new(Position.X.Scale, Position.X.Offset), UDim.new(Position.Y.Scale, Position.Y.Offset));
-            else
-                return DefaultSettings.WindowPosition;
-            end
-        end);
-        return DecodedConfig
-    end
-
-    EncodeConfig = function(Config)
-        local ToHSV = Color3new().ToHSV
-        local EncodedConfig = deepsearchset(Config, function(Index, Value)
-            return typeof(Value) == "Color3" or typeof(Value) == "UDim2"
-        end, function(Index, Value)
-            local Color = typeof(Value) == "Color3"
-            local Position = typeof(Value) == "UDim2"
-            if (Color) then
-                local H, S, V = ToHSV(Value);
-                return { HSVColor = { H = H, S = S, V = V } };
-            end
-            if (Position) then
-                return { Position = {
-                    X = { Scale = Value.X.Scale, Offset = Value.X.Offset };
-                    Y = { Scale = Value.Y.Scale, Offset = Value.Y.Offset }
-                } };
-            end
-        end)
-        return EncodedConfig
-    end
+    return tbl
 end
 
-local GetConfig = function()
-    local read, data = pcall(readfile, "fates-esp.json");
-    local canDecode, config = pcall(HttpService.JSONDecode, HttpService, data);
-    if (read and canDecode) then
-        local Decoded = DecodeConfig(config);
-        if (Decoded.Version ~= DefaultSettings.Version) then
-            local Encoded = HttpService:JSONEncode(EncodeConfig(DefaultSettings));
-            writefile("fates-esp.json", Encoded);
-            return DefaultSettings;
+local DecodeConfig = function(Config: {any}): {any}
+    return deepsearchset(Config, function(_, Value)
+        return type(Value) == "table" and (Value.HSVColor or Value.Position)
+    end, function(_, Value)
+        local Color = Value.HSVColor
+        local Position = Value.Position
+        if Color then
+            return Color3.fromHSV(Color.H, Color.S, Color.V)
         end
-        return Decoded;
-    else
-        local Encoded = HttpService:JSONEncode(EncodeConfig(DefaultSettings));
-        writefile("fates-esp.json", Encoded);
-        return DefaultSettings
-    end
+        if Position and Position.Y and Position.X then
+            return UDim2.new(UDim.new(Position.X.Scale, Position.X.Offset), UDim.new(Position.Y.Scale, Position.Y.Offset))
+        end
+        return DefaultSettings.WindowPosition
+    end)
 end
 
-local Settings = GetConfig();
+local EncodeConfig = function(Config: {any}): {any}
+    local ToHSV = Color3new().ToHSV
+    return deepsearchset(Config, function(_, Value)
+        return typeof(Value) == "Color3" or typeof(Value) == "UDim2"
+    end, function(_, Value)
+        if typeof(Value) == "Color3" then
+            local H, S, V = ToHSV(Value)
+            return {HSVColor = {H = H, S = S, V = V}}
+        end
+        return {Position = {
+            X = {Scale = Value.X.Scale, Offset = Value.X.Offset},
+            Y = {Scale = Value.Y.Scale, Offset = Value.Y.Offset}
+        }}
+    end)
+end
 
+local GetConfig = function(): {any}
+    local read, data = pcall(readfile, "fates-esp.json")
+    local canDecode, config = pcall(HS.JSONDecode, HS, data)
+    if read and canDecode then
+        local Decoded = DecodeConfig(config)
+        if Decoded.Version ~= DefaultSettings.Version then
+            writefile("fates-esp.json", HS:JSONEncode(EncodeConfig(DefaultSettings)))
+            return DefaultSettings
+        end
+        return Decoded
+    end
+    writefile("fates-esp.json", HS:JSONEncode(EncodeConfig(DefaultSettings)))
+    return DefaultSettings
+end
+
+local Settings = GetConfig()
 local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse();
-local MouseVector = Vector2new(Mouse.X, Mouse.Y);
+local Mouse = LocalPlayer:GetMouse()
+local MouseVector = Vector2new(Mouse.X, Mouse.Y)
 local Characters = {}
 
 local CustomGet = {
-    [0] = function()
-        return {}
-    end
+    [0] = function() return {} end
 }
 
-local Get;
-if (CustomGet[PlaceId]) then
-    Get = CustomGet[PlaceId]();
-end
+local Get = CustomGet[PlaceId] and CustomGet[PlaceId]() or nil
 
-local GetCharacter = function(Player)
-    if (Get) then
-        return Get.GetCharacter(Player);
-    end
+local GetCharacter = function(Player: Player): Model?
+    if Get then return Get.GetCharacter(Player) end
     return Player.Character
 end
-local CharacterAdded = function(Player, Callback)
-    if (Get) then
-        return
-    end
-    Player.CharacterAdded:Connect(Callback);
+local CharacterAdded = function(Player: Player, Callback: (Model) -> ())
+    if Get then return end
+    Player.CharacterAdded:Connect(Callback)
 end
-local CharacterRemoving = function(Player, Callback)
-    if (Get) then
-        return
-    end
-    Player.CharacterRemoving:Connect(Callback);
+local CharacterRemoving = function(Player: Player, Callback: (Model) -> ())
+    if Get then return end
+    Player.CharacterRemoving:Connect(Callback)
 end
-
-local GetTeam = function(Player)
-    if (Get) then
-        return Get.GetTeam(Player);
-    end
+local GetTeam = function(Player: Player): Team?
+    if Get then return Get.GetTeam(Player) end
     return Player.Team
 end
 
 local Drawings = {}
-
 local AimbotSettings = Settings.Aimbot
 local EspSettings = Settings.Esp
 
-local FOV = Drawing.new("Circle");
+local FOV = Drawing.new("Circle")
 FOV.Color = AimbotSettings.FovColor
 FOV.Thickness = AimbotSettings.FovThickness
 FOV.Transparency = AimbotSettings.FovTransparency
 FOV.Filled = false
 FOV.Radius = AimbotSettings.FovSize
 
-local Snaplines = Drawing.new("Line");
+local Snaplines = Drawing.new("Line")
 Snaplines.Color = AimbotSettings.FovColor
-Snaplines.Thickness = .1
+Snaplines.Thickness = 0.1
 Snaplines.Transparency = 1
 Snaplines.Visible = AimbotSettings.Snaplines
 
-table.insert(Drawings, FOV);
-table.insert(Drawings, Snaplines);
+table.insert(Drawings, FOV)
+table.insert(Drawings, Snaplines)
 
-local HandlePlayer = function(Player)
-    local Character = GetCharacter(Player);
-    if (Character) then
+local HandlePlayer = function(Player: Player)
+    local Character = GetCharacter(Player)
+    if Character then
         Characters[Player] = Character
     end
     CharacterAdded(Player, function(Char)
         Characters[Player] = Char
-    end);
-    CharacterRemoving(Player, function(Char)
+    end)
+    CharacterRemoving(Player, function()
         Characters[Player] = nil
         local PlayerDrawings = Drawings[Player]
-        if (PlayerDrawings) then
+        if PlayerDrawings then
             PlayerDrawings.Text.Visible = false
             PlayerDrawings.Box.Visible = false
             PlayerDrawings.Tracer.Visible = false
         end
-    end);
+    end)
 
-    if (Player == LocalPlayer) then return; end
+    if Player == LocalPlayer then return end
 
-    local Text = Drawing.new("Text");
+    local Text = Drawing.new("Text")
     Text.Color = EspSettings.Color
     Text.OutlineColor = EspSettings.OutlineColor
     Text.Size = EspSettings.Size
@@ -252,40 +223,37 @@ local HandlePlayer = function(Player)
     Text.Center = true
     Text.Outline = true
 
-    local Tracer = Drawing.new("Line");
+    local Tracer = Drawing.new("Line")
     Tracer.Color = EspSettings.Color
-    Tracer.From = Vector2new(CurrentCamera.ViewportSize.X / 2, CurrentCamera.ViewportSize.Y);
+    Tracer.From = Vector2new(CurrentCamera.ViewportSize.X / 2, CurrentCamera.ViewportSize.Y)
     Tracer.Thickness = EspSettings.TracerThickness
     Tracer.Transparency = EspSettings.TracerTrancparency
 
-    local Box = Drawing.new("Quad");
+    local Box = Drawing.new("Quad")
     Box.Thickness = EspSettings.Thickness
     Box.Transparency = EspSettings.Transparency
     Box.Filled = false
     Box.Color = EspSettings.Color
 
-    Drawings[Player] = { Text = Text, Tracer = Tracer, Box = Box }
+    Drawings[Player] = {Text = Text, Tracer = Tracer, Box = Box}
 end
 
-for Index, Player in pairs(Players:GetPlayers()) do
-    HandlePlayer(Player);
+for _, Player in pairs(Players:GetPlayers()) do
+    HandlePlayer(Player)
 end
-Players.PlayerAdded:Connect(function(Player)
-    HandlePlayer(Player);
-end);
-
-Players.PlayerRemoving:Connect(function(Player)
+Players.PlayerAdded:Connect(HandlePlayer)
+Players.PlayerRemoving:Connect(function(Player: Player)
     Characters[Player] = nil
     local PlayerDrawings = Drawings[Player]
-    for Index, Drawing in pairs(PlayerDrawings or {}) do
-        Drawing.Visible = false
+    for _, DrawObj in pairs(PlayerDrawings or {}) do
+        DrawObj.Visible = false
     end
     Drawings[Player] = nil
-end);
+end)
 
-local SetProperties = function(Properties)
+local SetProperties = function(Properties: {[string]: {[string]: any}})
     for Player, PlayerDrawings in pairs(Drawings) do
-        if (type(Player) ~= "number") then
+        if type(Player) ~= "number" then
             for Property, Value in pairs(Properties.Tracer or {}) do
                 PlayerDrawings.Tracer[Property] = Value
             end
@@ -299,15 +267,28 @@ local SetProperties = function(Properties)
     end
 end
 
+local randomised = random(1, 10)
+local randomisedVector = Vector3new(random(1, 10), random(1, 10), random(1, 10))
+Mouse.Move:Connect(function()
+    randomised = random(1, 10)
+    randomisedVector = Vector3new(random(1, 10), random(1, 10), random(1, 10))
+end)
 
-local GetClosestPlayerAndRender = function()
-    MouseVector = Vector2new(Mouse.X, Mouse.Y + Inset);
-    local Closest = create(4);
-    local Vector2Distance = math.huge
-    local Vector3DistanceOnScreen = math.huge
-    local Vector3Distance = math.huge
+local ClosestCharacter: Model? = nil
+local ClosestVector: Vector2? = nil
+local ClosestPlayer: Player? = nil
+local Aimlock: BasePart? = nil
 
-    if (AimbotSettings.ShowFov) then
+local GetClosestPlayerAndRender = function(): (Model?, Vector2?, Player?, BasePart?)
+    MouseVector = Vector2new(Mouse.X, Mouse.Y + Inset)
+    local BestV2Dist = math.huge
+    local BestV3Dist = math.huge
+    local ResultChar: Model? = nil
+    local ResultVec: Vector2? = nil
+    local ResultPlayer: Player? = nil
+    local ResultLock: BasePart? = nil
+
+    if AimbotSettings.ShowFov then
         FOV.Position = MouseVector
         FOV.Visible = true
         Snaplines.Visible = false
@@ -315,134 +296,111 @@ local GetClosestPlayerAndRender = function()
         FOV.Visible = false
     end
 
-    local LocalRoot = Characters[LocalPlayer] and FindFirstChild(Characters[LocalPlayer], "HumanoidRootPart");
+    local LocalRoot = Characters[LocalPlayer] and FindFirstChild(Characters[LocalPlayer], "HumanoidRootPart")
+
     for Player, Character in pairs(Characters) do
-        if (Player == LocalPlayer) then continue; end
+        if Player == LocalPlayer then continue end
         local PlayerDrawings = Drawings[Player]
-        local PlayerRoot = FindFirstChild(Character, "HumanoidRootPart");
-        local PlayerTeam = GetTeam(Player);
-        if (PlayerRoot) then
-            local Redirect = FindFirstChild(Character, AimbotSettings.Aimlock);
-            if (not Redirect) then
+        local PlayerRoot = FindFirstChild(Character, "HumanoidRootPart")
+        local PlayerTeam = GetTeam(Player)
+
+        if PlayerRoot then
+            local Redirect = FindFirstChild(Character, AimbotSettings.Aimlock)
+            if not Redirect then
                 PlayerDrawings.Text.Visible = false
                 PlayerDrawings.Box.Visible = false
                 PlayerDrawings.Tracer.Visible = false
-                continue;
+                continue
             end
-            local RedirectPos = Redirect.Position
-            local Tuple, Visible = WorldToViewportPoint(CurrentCamera, RedirectPos);
-            local CharacterVec2 = Vector2new(Tuple.X, Tuple.Y);
-            local Vector2Magnitude = (MouseVector - CharacterVec2).Magnitude
-            local Vector3Magnitude = LocalRoot and (RedirectPos - LocalRoot.Position).Magnitude or math.huge
-            local InRenderDistance = Vector3Magnitude <= EspSettings.RenderDistance
 
-            if (not Tfind(AimbotSettings.BlacklistedTeams, PlayerTeam)) then
-                local InFovRadius = Vector2Magnitude <= FOV.Radius
-                if (InFovRadius) then
-                    if (Visible and Vector2Magnitude <= Vector2Distance and AimbotSettings.ClosestCursor) then
-                        Vector2Distance = Vector2Magnitude
-                        Closest = {Character, CharacterVec2, Player, Redirect}
-                        if (AimbotSettings.Snaplines and AimbotSettings.ShowFov) then
+            local RedirectPos = Redirect.Position
+            local Tuple, Visible = WorldToViewportPoint(CurrentCamera, RedirectPos)
+            local CharVec2 = Vector2new(Tuple.X, Tuple.Y)
+            local V2Mag = (MouseVector - CharVec2).Magnitude
+            local V3Mag = LocalRoot and (RedirectPos - LocalRoot.Position).Magnitude or math.huge
+            local InRenderDistance = V3Mag <= EspSettings.RenderDistance
+
+            if not Tfind(AimbotSettings.BlacklistedTeams, PlayerTeam) then
+                if V2Mag <= FOV.Radius then
+                    if Visible and V2Mag <= BestV2Dist and AimbotSettings.ClosestCursor then
+                        BestV2Dist = V2Mag
+                        ResultChar = Character
+                        ResultVec = CharVec2
+                        ResultPlayer = Player
+                        ResultLock = Redirect
+                        if AimbotSettings.Snaplines and AimbotSettings.ShowFov then
                             Snaplines.Visible = true
                             Snaplines.From = MouseVector
-                            Snaplines.To = CharacterVec2
+                            Snaplines.To = CharVec2
                         else
                             Snaplines.Visible = false
                         end
                     end
-
-                    if (Visible and Vector3Magnitude <= Vector3DistanceOnScreen and Settings.ClosestPlayer) then
-                        Vector3DistanceOnScreen = Vector3Magnitude
-                        Closest = {Character, CharacterVec2, Player, Redirect}
+                    if Visible and V3Mag <= BestV3Dist and AimbotSettings.ClosestCharacter then
+                        BestV3Dist = V3Mag
+                        ResultChar = Character
+                        ResultVec = CharVec2
+                        ResultPlayer = Player
+                        ResultLock = Redirect
                     end
                 end
             end
 
-            if (InRenderDistance and Visible and not Tfind(EspSettings.BlacklistedTeams, PlayerTeam)) then
-                local CharacterHumanoid = FindFirstChildWhichIsA(Character, "Humanoid") or { Health = 0, MaxHealth = 0 };
+            if InRenderDistance and Visible and not Tfind(EspSettings.BlacklistedTeams, PlayerTeam) then
+                local Humanoid = FindFirstChildWhichIsA(Character, "Humanoid") or {Health = 0, MaxHealth = 0}
                 PlayerDrawings.Text.Text = format("%s\n%s%s",
-                        EspSettings.NamesEnabled and Player.Name or "",
-                        EspSettings.DistanceEnabled and format("[%s]",
-                            floor(Vector3Magnitude)
-                        ) or "",
-                        EspSettings.HealthEnabled and format(" [%s/%s]",
-                            floor(CharacterHumanoid.Health),
-                            floor(CharacterHumanoid.MaxHealth)
-                        )  or ""
-                    );
+                    EspSettings.NamesEnabled and Player.Name or "",
+                    EspSettings.DistanceEnabled and format("[%s]", floor(V3Mag)) or "",
+                    EspSettings.HealthEnabled and format(" [%s/%s]", floor(Humanoid.Health), floor(Humanoid.MaxHealth)) or ""
+                )
+                PlayerDrawings.Text.Position = Vector2new(Tuple.X, Tuple.Y - 40)
 
-                PlayerDrawings.Text.Position = Vector2new(Tuple.X, Tuple.Y - 40);
-
-                if (EspSettings.TracersEnabled) then
-                    PlayerDrawings.Tracer.To = CharacterVec2
+                if EspSettings.TracersEnabled then
+                    PlayerDrawings.Tracer.To = CharVec2
                 end
 
-                if (EspSettings.BoxEsp) then
+                if EspSettings.BoxEsp then
                     local Parts = {}
-                    for Index, Part in pairs(Character:GetChildren()) do
-                        if (IsA(Part, "BasePart")) then
-                            local ViewportPos = WorldToViewportPoint(CurrentCamera, Part.Position);
-                            Parts[Part] = Vector2new(ViewportPos.X, ViewportPos.Y);
+                    for _, Part in pairs(Character:GetChildren()) do
+                        if IsA(Part, "BasePart") then
+                            local VP = WorldToViewportPoint(CurrentCamera, Part.Position)
+                            Parts[Part] = Vector2new(VP.X, VP.Y)
                         end
                     end
 
-                    local Top, Bottom, Left, Right
-                    local Distance = math.huge
-                    local ClosestPart = nil
-                    for i2, Pos in next, Parts do
-                        local Mag = (Pos - Vector2new(Tuple.X, 0)).Magnitude;
-                        if (Mag <= Distance) then
-                            ClosestPart = Pos
-                            Distance = Mag
+                    local function closestTo(target: Vector2): Vector2?
+                        local best: Vector2? = nil
+                        local bestDist = math.huge
+                        for _, Pos in next, Parts do
+                            local d = (Pos - target).Magnitude
+                            if d < bestDist then
+                                bestDist = d
+                                best = Pos
+                            end
                         end
+                        return best
                     end
-                    Top = ClosestPart
-                    ClosestPart = nil
-                    Distance = math.huge
-                    for i2, Pos in next, Parts do
-                        local Mag = (Pos - Vector2new(Tuple.X, CurrentCamera.ViewportSize.Y)).Magnitude;
-                        if (Mag <= Distance) then
-                            ClosestPart = Pos
-                            Distance = Mag
-                        end
-                    end
-                    Bottom = ClosestPart
-                    ClosestPart = nil
-                    Distance = math.huge
-                    for i2, Pos in next, Parts do
-                        local Mag = (Pos - Vector2new(0, Tuple.Y)).Magnitude;
-                        if (Mag <= Distance) then
-                            ClosestPart = Pos
-                            Distance = Mag
-                        end
-                    end
-                    Left = ClosestPart
-                    ClosestPart = nil
-                    Distance = math.huge
-                    for i2, Pos in next, Parts do
-                        local Mag = (Pos - Vector2new(CurrentCamera.ViewportSize.X, Tuple.Y)).Magnitude;
-                        if (Mag <= Distance) then
-                            ClosestPart = Pos
-                            Distance = Mag
-                        end
-                    end
-                    Right = ClosestPart
-                    ClosestPart = nil
-                    Distance = math.huge
 
-                    PlayerDrawings.Box.PointA = Vector2new(Right.X, Top.Y);
-                    PlayerDrawings.Box.PointB = Vector2new(Left.X, Top.Y);
-                    PlayerDrawings.Box.PointC = Vector2new(Left.X, Bottom.Y);
-                    PlayerDrawings.Box.PointD = Vector2new(Right.X, Bottom.Y);
+                    local VS = CurrentCamera.ViewportSize
+                    local Top = closestTo(Vector2new(Tuple.X, 0))
+                    local Bottom = closestTo(Vector2new(Tuple.X, VS.Y))
+                    local Left = closestTo(Vector2new(0, Tuple.Y))
+                    local Right = closestTo(Vector2new(VS.X, Tuple.Y))
+
+                    if Top and Bottom and Left and Right then
+                        PlayerDrawings.Box.PointA = Vector2new(Right.X, Top.Y)
+                        PlayerDrawings.Box.PointB = Vector2new(Left.X, Top.Y)
+                        PlayerDrawings.Box.PointC = Vector2new(Left.X, Bottom.Y)
+                        PlayerDrawings.Box.PointD = Vector2new(Right.X, Bottom.Y)
+                    end
                 end
 
-                if (EspSettings.TeamColors) then
-                    local TeamColor;
-                    if (PlayerTeam) then
-                        local BrickTeamColor = PlayerTeam.TeamColor
-                        TeamColor = BrickTeamColor.Color
+                if EspSettings.TeamColors then
+                    local TeamColor: Color3
+                    if PlayerTeam then
+                        TeamColor = PlayerTeam.TeamColor.Color
                     else
-                        TeamColor = Color3new(0.639216, 0.635294, 0.647059);
+                        TeamColor = Color3new(0.639216, 0.635294, 0.647059)
                     end
                     PlayerDrawings.Text.Color = TeamColor
                     PlayerDrawings.Box.Color = TeamColor
@@ -464,334 +422,255 @@ local GetClosestPlayerAndRender = function()
         end
     end
 
-    return unpack(Closest);
+    return ResultChar, ResultVec, ResultPlayer, ResultLock
 end
 
-local Locked, SwitchedCamera = false, false
-UserInputService.InputBegan:Connect(function(Inp)
-    if (AimbotSettings.Enabled and Inp.UserInputType == Enum.UserInputType.MouseButton2) then
+-- Undetected direct metatable hooks (no hookmetamethod/newcclosure)
+gmt.__index = function(self, property)
+    if ClosestPlayer and Aimlock and self == Mouse and not checkcaller() then
+        local CallingScript = getfenv(2).script
+        if CallingScript and CallingScript.Name == "CallingScript" then
+            return oldIndex(self, property)
+        end
+
+        local Index = property
+        if type(Index) == "string" then
+            Index = gsub(sub(Index, 0, 100), "%z.*", "")
+        end
+
+        local PassedChance = random(1, 100) < AimbotSettings.SilentAimHitChance
+        if PassedChance and AimbotSettings.SilentAim then
+            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
+            Index = gsub(Index, "^%l", upper)
+            local Hit = #Parts == 0 or AimbotSettings.Wallbang
+            if not Hit then
+                return oldIndex(self, property)
+            end
+            if Index == "Target" then return Aimlock end
+            if Index == "Hit" then
+                local hit = oldIndex(self, property)
+                local pos = Aimlock.Position + randomisedVector / 10
+                return CFramenew(pos.X, pos.Y, pos.Z, select(4, hit:components()))
+            end
+            if Index == "X" then return ClosestVector.X + randomised / 10 end
+            if Index == "Y" then return ClosestVector.Y + randomised / 10 end
+        end
+    end
+    return oldIndex(self, property)
+end
+
+local HookedFunctions: {[string]: {any}} = {}
+
+gmt.__namecall = function(self, ...)
+    local Method = gsub(getnamecallmethod() or "", "^%l", upper)
+    local Hooked = HookedFunctions[Method]
+    if Hooked and self == Hooked[1] then
+        return Hooked[3](self, ...)
+    end
+    return oldNamecall(self, ...)
+end
+
+setreadonly(gmt, true)
+
+HookedFunctions.FindPartOnRay = {Workspace, Workspace.FindPartOnRay, function(...)
+    local old = HookedFunctions.FindPartOnRay[4]
+    if AimbotSettings.SilentAim and ClosestPlayer and Aimlock and not checkcaller() then
+        if ClosestCharacter and random(1, 100) < AimbotSettings.SilentAimHitChance then
+            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
+            if #Parts == 0 or AimbotSettings.Wallbang then
+                return Aimlock, Aimlock.Position + Vector3new(random(1,10),random(1,10),random(1,10))/10, Vector3new(0,1,0), Aimlock.Material
+            end
+        end
+    end
+    return old(...)
+end}
+
+HookedFunctions.FindPartOnRayWithIgnoreList = {Workspace, Workspace.FindPartOnRayWithIgnoreList, function(...)
+    local old = HookedFunctions.FindPartOnRayWithIgnoreList[4]
+    if ClosestPlayer and Aimlock and not checkcaller() then
+        local CS = getcallingscript()
+        if CS and CS.Name ~= "ControlModule" and ClosestCharacter and random(1,100) < AimbotSettings.SilentAimHitChance then
+            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
+            if #Parts == 0 or AimbotSettings.Wallbang then
+                return Aimlock, Aimlock.Position + Vector3new(random(1,10),random(1,10),random(1,10))/10, Vector3new(0,1,0), Aimlock.Material
+            end
+        end
+    end
+    return old(...)
+end}
+
+for _, Func in pairs(HookedFunctions) do
+    Func[4] = hookfunction(Func[2], Func[3])
+end
+
+local Locked = false
+local SwitchedCamera = false
+
+UIS.InputBegan:Connect(function(Inp)
+    if AimbotSettings.Enabled and Inp.UserInputType == Enum.UserInputType.MouseButton2 then
         Locked = true
-        if (AimbotSettings.FirstPerson and LocalPlayer.CameraMode ~= Enum.CameraMode.LockFirstPerson) then
+        if AimbotSettings.FirstPerson and LocalPlayer.CameraMode ~= Enum.CameraMode.LockFirstPerson then
             LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
             SwitchedCamera = true
         end
     end
-end);
-UserInputService.InputEnded:Connect(function(Inp)
-    if (AimbotSettings.Enabled and Inp.UserInputType == Enum.UserInputType.MouseButton2) then
+end)
+UIS.InputEnded:Connect(function(Inp)
+    if AimbotSettings.Enabled and Inp.UserInputType == Enum.UserInputType.MouseButton2 then
         Locked = false
-        if (SwitchedCamera) then
+        if SwitchedCamera then
             LocalPlayer.CameraMode = Enum.CameraMode.Classic
+            SwitchedCamera = false
         end
     end
-end);
+end)
 
-local ClosestCharacter, Vector, Player, Aimlock;
-RunService.RenderStepped:Connect(function()
-    ClosestCharacter, Vector, Player, Aimlock = GetClosestPlayerAndRender();
-    if (Locked and AimbotSettings.Enabled and ClosestCharacter) then
-        if (AimbotSettings.FirstPerson) then
-            if (syn) then
-                CurrentCamera.CoordinateFrame = CFramenew(CurrentCamera.CoordinateFrame.p, Aimlock.Position);
-            else
-                mousemoverel((Vector.X - MouseVector.X) / AimbotSettings.Smoothness, (Vector.Y - MouseVector.Y) / AimbotSettings.Smoothness);
-            end
-        elseif (AimbotSettings.ThirdPerson) then
-            mousemoveabs(Vector.X, Vector.Y);
+RS.RenderStepped:Connect(function()
+    ClosestCharacter, ClosestVector, ClosestPlayer, Aimlock = GetClosestPlayerAndRender()
+    if Locked and AimbotSettings.Enabled and ClosestCharacter and ClosestVector then
+        if AimbotSettings.FirstPerson then
+            CurrentCamera.CoordinateFrame = CFramenew(CurrentCamera.CoordinateFrame.p, Aimlock.Position)
+        elseif AimbotSettings.ThirdPerson then
+            mousemoveabs(ClosestVector.X, ClosestVector.Y)
         end
     end
-end);
+end)
 
-local Hooks = {
-    HookedFunctions = {},
-    OldMetaMethods = {},
-    MetaMethodHooks = {},
-    HookedSignals = {}
-}
+local MainUI = UILibrary.new(Color3.fromRGB(255, 79, 87))
+local Window = MainUI:LoadWindow('<font color="#ff4f57">fates</font> esp', UDim2.fromOffset(400, 279))
+local EspPage = Window.NewPage("esp")
+local AimbotPage = Window.NewPage("aimbot")
+local EspSection = EspPage.NewSection("Esp")
+local TracerSection = EspPage.NewSection("Tracers")
+local SilentAimSection = AimbotPage.NewSection("Silent Aim")
+local AimbotSection = AimbotPage.NewSection("Aimbot")
 
-local OtherDeprecated = {
-    children = "GetChildren"
-}
-
-local RealMethods = {}
-local FakeMethods = {}
-
-local HookedFunctions = Hooks.HookedFunctions
-local MetaMethodHooks = Hooks.MetaMethodHooks
-local OldMetaMethods = Hooks.OldMetaMethods
-
-local randomised = random(1, 10);
-local randomisedVector = Vector3new(random(1, 10), random(1, 10), random(1, 10));
-Mouse.Move:Connect(function()
-    randomised = random(1, 10);
-    randomisedVector = Vector3new(random(1, 10), random(1, 10), random(1, 10));
-end);
-
-local x = setmetatable({}, {
-    __index = function(...)
-        print("index", ...);
-    end,
-    __add = function(...)
-        print("add", ...);
-    end,
-    __sub = function(...)
-        print("sub", ...);
-    end,
-    __mul = function(...)
-        print("mul", ...);
-    end
-});
-
-MetaMethodHooks.Index = function(...)
-    local __Index = OldMetaMethods.__index
-
-    if (Player and Aimlock and ... == Mouse and not checkcaller()) then
-        local CallingScript = getfenv(2).script;
-        if (CallingScript.Name == "CallingScript") then
-            return __Index(...);
-        end
-
-        local _Mouse, Index = ...
-        if (type(Index) == 'string') then
-            Index = gsub(sub(Index, 0, 100), "%z.*", "");
-        end
-        local PassedChance = random(1, 100) < AimbotSettings.SilentAimHitChance
-        if (PassedChance and AimbotSettings.SilentAim) then
-            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter});
-
-            Index = string.gsub(Index, "^%l", upper);
-            local Hit = #Parts == 0 or AimbotSettings.Wallbang
-            if (not Hit) then
-                return __Index(...);
-            end
-            if (Index == "Target") then
-                return Aimlock
-            end
-            if (Index == "Hit") then
-                local hit = __Index(...);
-                local pos = Aimlock.Position + randomisedVector / 10
-                return CFramenew(pos.X, pos.Y, pos.Z, unpack({hit:components()}, 4));
-            end
-            if (Index == "X") then
-                return Vector.X + randomised / 10
-            end
-            if (Index == "Y") then
-                return Vector.Y + randomised / 10
-            end
-        end
-    end
-
-    return __Index(...);
-end
-
-MetaMethodHooks.Namecall = function(...)
-    local __Namecall = OldMetaMethods.__namecall
-    local self = ...
-    local Method = gsub(getnamecallmethod() or "", "^%l", upper);
-    local Hooked = HookedFunctions[Method]
-    if (Hooked and self == Hooked[1]) then
-        return Hooked[3](...);
-    end
-
-    return __Namecall(...);
-end
-
-for MMName, MMFunc in pairs(MetaMethodHooks) do
-    local MetaMethod = string.format("__%s", string.lower(MMName));
-    Hooks.OldMetaMethods[MetaMethod] = hookmetamethod(game, MetaMethod, MMFunc);
-end
-
-HookedFunctions.FindPartOnRay = {Workspace, Workspace.FindPartOnRay, function(...)
-    local OldFindPartOnRay = HookedFunctions.FindPartOnRay[4]
-    if (AimbotSettings.SilentAim and Player and Aimlock and not checkcaller()) then
-        local PassedChance = random(1, 100) < AimbotSettings.SilentAimHitChance
-        if (ClosestCharacter and PassedChance) then
-            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter});
-            if (#Parts == 0 or AimbotSettings.Wallbang) then
-                return Aimlock, Aimlock.Position + (Vector3new(random(1, 10), random(1, 10), random(1, 10)) / 10), Vector3new(0, 1, 0), Aimlock.Material
-            end
-        end
-    end
-    return OldFindPartOnRay(...);
-end};
-
-HookedFunctions.FindPartOnRayWithIgnoreList = {Workspace, Workspace.FindPartOnRayWithIgnoreList, function(...)
-    local OldFindPartOnRayWithIgnoreList = HookedFunctions.FindPartOnRayWithIgnoreList[4]
-    if (Player and Aimlock and not checkcaller()) then
-        local CallingScript = getcallingscript();
-        local PassedChance = random(1, 100) < AimbotSettings.SilentAimHitChance
-        if (CallingScript.Name ~= "ControlModule" and ClosestCharacter and PassedChance) then
-            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter});
-            if (#Parts == 0 or AimbotSettings.Wallbang) then
-                return Aimlock, Aimlock.Position + (Vector3new(random(1, 10), random(1, 10), random(1, 10)) / 10), Vector3new(0, 1, 0), Aimlock.Material
-            end
-        end
-    end
-    return OldFindPartOnRayWithIgnoreList(...);
-end};
-
-for Index, Function in pairs(HookedFunctions) do
-    Function[4] = hookfunction(Function[2], Function[3]);
-end
-
-local MainUI = UILibrary.new(Color3.fromRGB(255, 79, 87));
-local Window = MainUI:LoadWindow('<font color="#ff4f57">fates</font> esp', UDim2.fromOffset(400, 279));
-local ESP = Window.NewPage("esp");
-local Aimbot = Window.NewPage("aimbot");
-local EspSettingsUI = ESP.NewSection("Esp");
-local TracerSettingsUI = ESP.NewSection("Tracers");
-local SilentAim = Aimbot.NewSection("Silent Aim");
-local Aimbot = Aimbot.NewSection("Aimbot");
-
-EspSettingsUI.Toggle("Show Names", EspSettings.NamesEnabled, function(Callback)
-    EspSettings.NamesEnabled = Callback
-end);
-EspSettingsUI.Toggle("Show Health", EspSettings.HealthEnabled, function(Callback)
-    EspSettings.HealthEnabled = Callback
-end);
-EspSettingsUI.Toggle("Show Distance", EspSettings.DistanceEnabled, function(Callback)
-    EspSettings.DistanceEnabled = Callback
-end);
-EspSettingsUI.Toggle("Box Esp", EspSettings.BoxEsp, function(Callback)
-    EspSettings.BoxEsp = Callback
-    SetProperties({ Box = { Visible = Callback } });
-end);
-EspSettingsUI.Slider("Render Distance", { Min = 0, Max = 50000, Default = math.clamp(EspSettings.RenderDistance, 0, 50000), Step = 10 }, function(Callback)
-    EspSettings.RenderDistance = Callback
-end);
-EspSettingsUI.Slider("Esp Size", { Min = 0, Max = 30, Default = EspSettings.Size, Step = 1}, function(Callback)
-    EspSettings.Size = Callback
-    SetProperties({ Text = { Size = Callback } });
-end);
-EspSettingsUI.ColorPicker("Esp Color", EspSettings.Color, function(Callback)
+EspSection.Toggle("Show Names", EspSettings.NamesEnabled, function(v) EspSettings.NamesEnabled = v end)
+EspSection.Toggle("Show Health", EspSettings.HealthEnabled, function(v) EspSettings.HealthEnabled = v end)
+EspSection.Toggle("Show Distance", EspSettings.DistanceEnabled, function(v) EspSettings.DistanceEnabled = v end)
+EspSection.Toggle("Box Esp", EspSettings.BoxEsp, function(v)
+    EspSettings.BoxEsp = v
+    SetProperties({Box = {Visible = v}})
+end)
+EspSection.Slider("Render Distance", {Min=0,Max=50000,Default=math.clamp(EspSettings.RenderDistance,0,50000),Step=10}, function(v) EspSettings.RenderDistance = v end)
+EspSection.Slider("Esp Size", {Min=0,Max=30,Default=EspSettings.Size,Step=1}, function(v)
+    EspSettings.Size = v
+    SetProperties({Text = {Size = v}})
+end)
+EspSection.ColorPicker("Esp Color", EspSettings.Color, function(v)
     EspSettings.TeamColors = false
-    EspSettings.Color = Callback
-    SetProperties({ Box = { Color = Callback }, Text = { Color = Callback }, Tracer = { Color = Callback } });
-end);
-EspSettingsUI.Toggle("Team Colors", EspSettings.TeamColors, function(Callback)
-    EspSettings.TeamColors = Callback
-    if (not Callback) then
-        SetProperties({ Tracer = { Color = EspSettings.Color }; Box = { Color = EspSettings.Color }; Text = { Color = EspSettings.Color }  })
+    EspSettings.Color = v
+    SetProperties({Box={Color=v},Text={Color=v},Tracer={Color=v}})
+end)
+EspSection.Toggle("Team Colors", EspSettings.TeamColors, function(v)
+    EspSettings.TeamColors = v
+    if not v then
+        SetProperties({Tracer={Color=EspSettings.Color},Box={Color=EspSettings.Color},Text={Color=EspSettings.Color}})
     end
-end);
-EspSettingsUI.Dropdown("Teams", {"Allies", "Enemies", "All"}, function(Callback)
-    table.clear(EspSettings.BlacklistedTeams);
-    if (Callback == "Enemies") then
-        table.insert(EspSettings.BlacklistedTeams, LocalPlayer.Team);
-    end
-    if (Callback == "Allies") then
-        local AllTeams = Teams:GetTeams();
-        table.remove(AllTeams, table.find(AllTeams, LocalPlayer.Team));
+end)
+EspSection.Dropdown("Teams", {"Allies","Enemies","All"}, function(v)
+    table.clear(EspSettings.BlacklistedTeams)
+    if v == "Enemies" then
+        table.insert(EspSettings.BlacklistedTeams, LocalPlayer.Team)
+    elseif v == "Allies" then
+        local AllTeams = Teams:GetTeams()
+        table.remove(AllTeams, table.find(AllTeams, LocalPlayer.Team))
         EspSettings.BlacklistedTeams = AllTeams
     end
-end);
-TracerSettingsUI.Toggle("Enable Tracers", EspSettings.TracersEnabled, function(Callback)
-    EspSettings.TracersEnabled = Callback
-    SetProperties({ Tracer = { Visible = Callback } });
-end);
-TracerSettingsUI.Dropdown("To", {"Head", "Torso"}, function(Callback)
-    AimbotSettings.Aimlock = Callback == "Torso" and "HumanoidRootPart" or Callback
-end);
-TracerSettingsUI.Dropdown("From", {"Top", "Bottom", "Left", "Right"}, function(Callback)
-    local ViewportSize = CurrentCamera.ViewportSize
-    local From = Callback == "Top" and Vector2new(ViewportSize.X / 2, ViewportSize.Y - ViewportSize.Y) or Callback == "Bottom" and Vector2new(ViewportSize.X / 2, ViewportSize.Y) or Callback == "Left" and Vector2new(ViewportSize.X - ViewportSize.X, ViewportSize.Y / 2) or Callback == "Right" and Vector2new(ViewportSize.X, ViewportSize.Y / 2);
+end)
+
+TracerSection.Toggle("Enable Tracers", EspSettings.TracersEnabled, function(v)
+    EspSettings.TracersEnabled = v
+    SetProperties({Tracer={Visible=v}})
+end)
+TracerSection.Dropdown("To", {"Head","Torso"}, function(v)
+    AimbotSettings.Aimlock = v == "Torso" and "HumanoidRootPart" or v
+end)
+TracerSection.Dropdown("From", {"Top","Bottom","Left","Right"}, function(v)
+    local VS = CurrentCamera.ViewportSize
+    local From = v == "Top" and Vector2new(VS.X/2, 0)
+        or v == "Bottom" and Vector2new(VS.X/2, VS.Y)
+        or v == "Left" and Vector2new(0, VS.Y/2)
+        or Vector2new(VS.X, VS.Y/2)
     EspSettings.TracerFrom = From
-    SetProperties({ Tracer = { From = From } });
-end);
-TracerSettingsUI.Slider("Tracer Transparency", {Min = 0, Max = 1, Default = EspSettings.TracerTrancparency, Step = .1}, function(Callback)
-    EspSettings.TracerTrancparency = Callback
-    SetProperties({ Tracer = { Transparency = Callback } });
-end);
-TracerSettingsUI.Slider("Tracer Thickness", {Min = 0, Max = 5, Default = EspSettings.TracerThickness, Step = .1}, function(Callback)
-    EspSettings.TracerThickness = Callback
-    SetProperties({ Tracer = { Thickness = Callback } });
-end);
+    SetProperties({Tracer={From=From}})
+end)
+TracerSection.Slider("Tracer Transparency", {Min=0,Max=1,Default=EspSettings.TracerTrancparency,Step=0.1}, function(v)
+    EspSettings.TracerTrancparency = v
+    SetProperties({Tracer={Transparency=v}})
+end)
+TracerSection.Slider("Tracer Thickness", {Min=0,Max=5,Default=EspSettings.TracerThickness,Step=0.1}, function(v)
+    EspSettings.TracerThickness = v
+    SetProperties({Tracer={Thickness=v}})
+end)
 
-SilentAim.Toggle("Silent Aim", AimbotSettings.SilentAim, function(Callback)
-    AimbotSettings.SilentAim = Callback
-end);
-SilentAim.Toggle("Wallbang", AimbotSettings.Wallbang, function(Callback)
-    AimbotSettings.Wallbang = Callback
-end);
-SilentAim.Dropdown("Redirect", {"Head", "Torso"}, function(Callback)
-    AimbotSettings.SilentAimRedirect = Callback
-end);
-SilentAim.Slider("Hit Chance", {Min = 0, Max = 100, Default = AimbotSettings.SilentAimHitChance, Step = 1}, function(Callback)
-    AimbotSettings.SilentAimHitChance = Callback
-end);
-
-SilentAim.Dropdown("Lock Type", {"Closest Cursor", "Closest Player"}, function(Callback)
-    if (Callback == "Closest Cursor") then
+SilentAimSection.Toggle("Silent Aim", AimbotSettings.SilentAim, function(v) AimbotSettings.SilentAim = v end)
+SilentAimSection.Toggle("Wallbang", AimbotSettings.Wallbang, function(v) AimbotSettings.Wallbang = v end)
+SilentAimSection.Dropdown("Redirect", {"Head","Torso"}, function(v) AimbotSettings.SilentAimRedirect = v end)
+SilentAimSection.Slider("Hit Chance", {Min=0,Max=100,Default=AimbotSettings.SilentAimHitChance,Step=1}, function(v) AimbotSettings.SilentAimHitChance = v end)
+SilentAimSection.Dropdown("Lock Type", {"Closest Cursor","Closest Player"}, function(v)
+    if v == "Closest Cursor" then
         AimbotSettings.ClosestCharacter = false
         AimbotSettings.ClosestCursor = true
     else
         AimbotSettings.ClosestCharacter = true
         AimbotSettings.ClosestCursor = false
     end
-end);
+end)
 
-Aimbot.Toggle("Aimbot (M2)", AimbotSettings.Enabled, function(Callback)
-    AimbotSettings.Enabled = Callback
-    if (not AimbotSettings.FirstPerson and not AimbotSettings.ThirdPerson) then
+AimbotSection.Toggle("Aimbot (M2)", AimbotSettings.Enabled, function(v)
+    AimbotSettings.Enabled = v
+    if not AimbotSettings.FirstPerson and not AimbotSettings.ThirdPerson then
         AimbotSettings.FirstPerson = true
     end
-end);
-Aimbot.Slider("Aimbot Smoothness", {Min = 1, Max = 10, Default = AimbotSettings.Smoothness, Step = .5}, function(Callback)
-    AimbotSettings.Smoothness = Callback
-end);
-local sortTeams = function(Callback)
-    table.clear(AimbotSettings.BlacklistedTeams);
-    if (Callback == "Enemies") then
-        table.insert(AimbotSettings.BlacklistedTeams, LocalPlayer.Team);
-    end
-    if (Callback == "Allies") then
-        local AllTeams = Teams:GetTeams();
-        table.remove(AllTeams, table.find(AllTeams, LocalPlayer.Team));
+end)
+AimbotSection.Slider("Aimbot Smoothness", {Min=1,Max=10,Default=AimbotSettings.Smoothness,Step=0.5}, function(v) AimbotSettings.Smoothness = v end)
+
+local sortTeams = function(v: string)
+    table.clear(AimbotSettings.BlacklistedTeams)
+    if v == "Enemies" then
+        table.insert(AimbotSettings.BlacklistedTeams, LocalPlayer.Team)
+    elseif v == "Allies" then
+        local AllTeams = Teams:GetTeams()
+        table.remove(AllTeams, table.find(AllTeams, LocalPlayer.Team))
         AimbotSettings.BlacklistedTeams = AllTeams
     end
 end
-Aimbot.Dropdown("Team Target", {"Allies", "Enemies", "All"}, sortTeams);
-sortTeams("Enemies");
-Aimbot.Dropdown("Aimlock Type", {"Third Person", "First Person"}, function(callback)
-    if (callback == "Third Person") then
-        AimbotSettings.ThirdPerson = true
-        AimbotSettings.FirstPerson = false
-    else
-        AimbotSettings.ThirdPerson = false
-        AimbotSettings.FirstPerson = true
-    end
-end);
+AimbotSection.Dropdown("Team Target", {"Allies","Enemies","All"}, sortTeams)
+sortTeams("Enemies")
 
-Aimbot.Toggle("Show Fov", AimbotSettings.ShowFov, function(Callback)
-    AimbotSettings.ShowFov = Callback
-    FOV.Visible = Callback
-end);
-Aimbot.ColorPicker("Fov Color", AimbotSettings.FovColor, function(Callback)
-    AimbotSettings.FovColor = Callback
-    FOV.Color = Callback
-    Snaplines.Color = Callback
-end);
-Aimbot.Slider("Fov Size", {Min = 70, Max = 500, Default = AimbotSettings.FovSize, Step = 10}, function(Callback)
-    AimbotSettings.FovSize = Callback
-    FOV.Radius = Callback
-end);
-Aimbot.Toggle("Enable Snaplines", AimbotSettings.Snaplines, function(Callback)
-    AimbotSettings.Snaplines = Callback
-end);
-Window.SetPosition(Settings.WindowPosition);
+AimbotSection.Dropdown("Aimlock Type", {"Third Person","First Person"}, function(v)
+    AimbotSettings.ThirdPerson = v == "Third Person"
+    AimbotSettings.FirstPerson = v == "First Person"
+end)
+AimbotSection.Toggle("Show Fov", AimbotSettings.ShowFov, function(v)
+    AimbotSettings.ShowFov = v
+    FOV.Visible = v
+end)
+AimbotSection.ColorPicker("Fov Color", AimbotSettings.FovColor, function(v)
+    AimbotSettings.FovColor = v
+    FOV.Color = v
+    Snaplines.Color = v
+end)
+AimbotSection.Slider("Fov Size", {Min=70,Max=500,Default=AimbotSettings.FovSize,Step=10}, function(v)
+    AimbotSettings.FovSize = v
+    FOV.Radius = v
+end)
+AimbotSection.Toggle("Enable Snaplines", AimbotSettings.Snaplines, function(v) AimbotSettings.Snaplines = v end)
 
-if (gethui) then
-    MainUI.UI.Parent = gethui();
+Window.SetPosition(Settings.WindowPosition)
+
+if gethui then
+    MainUI.UI.Parent = gethui()
 else
-    local protect_gui = (syn or getgenv()).protect_gui
-    if (protect_gui) then
-        protect_gui(MainUI.UI);
+    local protectGui = (syn or getgenv()).protect_gui
+    if protectGui then
+        protectGui(MainUI.UI)
     end
-    MainUI.UI.Parent = game:GetService("CoreGui");
+    MainUI.UI.Parent = game:GetService("CoreGui")
 end
 
-while wait(5) do
-    Settings.WindowPosition = Window.GetPosition();
-    local Encoded = HttpService:JSONEncode(EncodeConfig(Settings));
-    writefile("fates-esp.json", Encoded);
+while task.wait(5) do
+    Settings.WindowPosition = Window.GetPosition()
+    writefile("fates-esp.json", HS:JSONEncode(EncodeConfig(Settings)))
 end
