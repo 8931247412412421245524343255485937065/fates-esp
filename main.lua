@@ -29,7 +29,6 @@ local Vector3new = Vector3.new
 local CFramenew = CFrame.new
 local Color3new = Color3.new
 local Tfind = table.find
-local create = table.create
 local format = string.format
 local floor = math.floor
 local gsub = string.gsub
@@ -75,7 +74,14 @@ local DefaultSettings = {
         FovColor = Color3new(1, 1, 1),
         Aimlock = "Head",
         SilentAimRedirect = "Head",
-        BlacklistedTeams = {}
+        BlacklistedTeams = {},
+        SilentAimMethods = {
+            FindPartOnRay = true,
+            FindPartOnRayWithIgnoreList = true,
+            FindPartOnRayWithWhitelist = true,
+            Raycast = true,
+            Cast = true,
+        }
     },
     WindowPosition = UDim2.new(0.5, -200, 0.5, -139),
     Version = 1.2
@@ -147,6 +153,19 @@ local GetConfig = function(): {any}
 end
 
 local Settings = GetConfig()
+
+-- backfill missing keys from DefaultSettings so new fields never come up nil
+local function mergeDefaults(target: {any}, defaults: {any})
+    for k, v in next, defaults do
+        if target[k] == nil then
+            target[k] = v
+        elseif type(v) == "table" and type(target[k]) == "table" then
+            mergeDefaults(target[k], v)
+        end
+    end
+end
+mergeDefaults(Settings, DefaultSettings)
+
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 local MouseVector = Vector2new(Mouse.X, Mouse.Y)
@@ -425,76 +444,133 @@ local GetClosestPlayerAndRender = function(): (Model?, Vector2?, Player?, BasePa
     return ResultChar, ResultVec, ResultPlayer, ResultLock
 end
 
--- Undetected direct metatable hooks (no hookmetamethod/newcclosure)
+local function ShouldRedirect(): boolean
+    if not AimbotSettings.SilentAim then return false end
+    if not ClosestPlayer or not Aimlock or not ClosestCharacter then return false end
+    if checkcaller() then return false end
+    if random(1, 100) > AimbotSettings.SilentAimHitChance then return false end
+    local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
+    return #Parts == 0 or AimbotSettings.Wallbang
+end
+
+local function RandomOffset(): Vector3
+    return Vector3new(random(1, 10), random(1, 10), random(1, 10)) / 10
+end
+
 gmt.__index = function(self, property)
     if ClosestPlayer and Aimlock and self == Mouse and not checkcaller() then
-        local CallingScript = getfenv(2).script
-        if CallingScript and CallingScript.Name == "CallingScript" then
-            return oldIndex(self, property)
-        end
-
         local Index = property
         if type(Index) == "string" then
             Index = gsub(sub(Index, 0, 100), "%z.*", "")
         end
 
-        local PassedChance = random(1, 100) < AimbotSettings.SilentAimHitChance
+        local PassedChance = random(1, 100) <= AimbotSettings.SilentAimHitChance
         if PassedChance and AimbotSettings.SilentAim then
             local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
             Index = gsub(Index, "^%l", upper)
             local Hit = #Parts == 0 or AimbotSettings.Wallbang
-            if not Hit then
-                return oldIndex(self, property)
+            if Hit then
+                if Index == "Target" then return Aimlock end
+                if Index == "Hit" then
+                    local hit = oldIndex(self, property)
+                    local pos = Aimlock.Position + randomisedVector / 10
+                    return CFramenew(pos.X, pos.Y, pos.Z, select(4, hit:components()))
+                end
+                if Index == "X" then return ClosestVector and ClosestVector.X + randomised / 10 end
+                if Index == "Y" then return ClosestVector and ClosestVector.Y + randomised / 10 end
+                if Index == "UnitRay" then
+                    local origin = CurrentCamera.CFrame.Position
+                    local dir = (Aimlock.Position - origin).Unit
+                    return Ray.new(origin, dir)
+                end
             end
-            if Index == "Target" then return Aimlock end
-            if Index == "Hit" then
-                local hit = oldIndex(self, property)
-                local pos = Aimlock.Position + randomisedVector / 10
-                return CFramenew(pos.X, pos.Y, pos.Z, select(4, hit:components()))
-            end
-            if Index == "X" then return ClosestVector.X + randomised / 10 end
-            if Index == "Y" then return ClosestVector.Y + randomised / 10 end
         end
     end
     return oldIndex(self, property)
 end
 
-local HookedFunctions: {[string]: {any}} = {}
-
 gmt.__namecall = function(self, ...)
-    local Method = gsub(getnamecallmethod() or "", "^%l", upper)
-    local Hooked = HookedFunctions[Method]
-    if Hooked and self == Hooked[1] then
-        return Hooked[3](self, ...)
+    local Method = getnamecallmethod()
+    local MethodUp = gsub(Method, "^%l", upper)
+
+    if self == Workspace and ShouldRedirect() then
+        local jitter = RandomOffset()
+
+        if MethodUp == "Raycast" and AimbotSettings.SilentAimMethods.Raycast then
+            local Args = {...}
+            local Origin: Vector3 = Args[1]
+            if typeof(Origin) == "Vector3" then
+                Args[2] = (Aimlock.Position - Origin).Unit * 1000
+                return oldNamecall(self, table.unpack(Args))
+            end
+
+        elseif MethodUp == "Cast" and AimbotSettings.SilentAimMethods.Cast then
+            local Args = {...}
+            local Origin: Vector3 = Args[1]
+            if typeof(Origin) == "Vector3" then
+                Args[2] = (Aimlock.Position - Origin).Unit * 1000
+                return oldNamecall(self, table.unpack(Args))
+            end
+
+        elseif MethodUp == "FindPartOnRay" and AimbotSettings.SilentAimMethods.FindPartOnRay then
+            local Args = {...}
+            local RayArg = Args[1]
+            if typeof(RayArg) == "Ray" then
+                Args[1] = Ray.new(RayArg.Origin, (Aimlock.Position - RayArg.Origin).Unit * 1000)
+                return oldNamecall(self, table.unpack(Args))
+            end
+
+        elseif MethodUp == "FindPartOnRayWithIgnoreList" and AimbotSettings.SilentAimMethods.FindPartOnRayWithIgnoreList then
+            local CS = getcallingscript and getcallingscript()
+            if not CS or CS.Name ~= "ControlModule" then
+                local Args = {...}
+                local RayArg = Args[1]
+                if typeof(RayArg) == "Ray" then
+                    Args[1] = Ray.new(RayArg.Origin, (Aimlock.Position - RayArg.Origin).Unit * 1000)
+                    return oldNamecall(self, table.unpack(Args))
+                end
+            end
+
+        elseif MethodUp == "FindPartOnRayWithWhitelist" and AimbotSettings.SilentAimMethods.FindPartOnRayWithWhitelist then
+            local Args = {...}
+            local RayArg = Args[1]
+            if typeof(RayArg) == "Ray" then
+                Args[1] = Ray.new(RayArg.Origin, (Aimlock.Position - RayArg.Origin).Unit * 1000)
+                return oldNamecall(self, table.unpack(Args))
+            end
+        end
     end
+
     return oldNamecall(self, ...)
 end
 
 setreadonly(gmt, true)
 
+local HookedFunctions: {[string]: {any}} = {}
+
 HookedFunctions.FindPartOnRay = {Workspace, Workspace.FindPartOnRay, function(...)
     local old = HookedFunctions.FindPartOnRay[4]
-    if AimbotSettings.SilentAim and ClosestPlayer and Aimlock and not checkcaller() then
-        if ClosestCharacter and random(1, 100) < AimbotSettings.SilentAimHitChance then
-            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
-            if #Parts == 0 or AimbotSettings.Wallbang then
-                return Aimlock, Aimlock.Position + Vector3new(random(1,10),random(1,10),random(1,10))/10, Vector3new(0,1,0), Aimlock.Material
-            end
-        end
+    if AimbotSettings.SilentAimMethods.FindPartOnRay and ShouldRedirect() then
+        return Aimlock, Aimlock.Position + RandomOffset(), Vector3new(0,1,0), Aimlock.Material
     end
     return old(...)
 end}
 
 HookedFunctions.FindPartOnRayWithIgnoreList = {Workspace, Workspace.FindPartOnRayWithIgnoreList, function(...)
     local old = HookedFunctions.FindPartOnRayWithIgnoreList[4]
-    if ClosestPlayer and Aimlock and not checkcaller() then
-        local CS = getcallingscript()
-        if CS and CS.Name ~= "ControlModule" and ClosestCharacter and random(1,100) < AimbotSettings.SilentAimHitChance then
-            local Parts = GetPartsObscuringTarget(CurrentCamera, {CurrentCamera.CFrame.Position, Aimlock.Position}, {LocalPlayer.Character, ClosestCharacter})
-            if #Parts == 0 or AimbotSettings.Wallbang then
-                return Aimlock, Aimlock.Position + Vector3new(random(1,10),random(1,10),random(1,10))/10, Vector3new(0,1,0), Aimlock.Material
-            end
+    if AimbotSettings.SilentAimMethods.FindPartOnRayWithIgnoreList and ShouldRedirect() then
+        local CS = getcallingscript and getcallingscript()
+        if not CS or CS.Name ~= "ControlModule" then
+            return Aimlock, Aimlock.Position + RandomOffset(), Vector3new(0,1,0), Aimlock.Material
         end
+    end
+    return old(...)
+end}
+
+HookedFunctions.FindPartOnRayWithWhitelist = {Workspace, Workspace.FindPartOnRayWithWhitelist, function(...)
+    local old = HookedFunctions.FindPartOnRayWithWhitelist[4]
+    if AimbotSettings.SilentAimMethods.FindPartOnRayWithWhitelist and ShouldRedirect() then
+        return Aimlock, Aimlock.Position + RandomOffset(), Vector3new(0,1,0), Aimlock.Material
     end
     return old(...)
 end}
@@ -606,6 +682,11 @@ end)
 
 SilentAimSection.Toggle("Silent Aim", AimbotSettings.SilentAim, function(v) AimbotSettings.SilentAim = v end)
 SilentAimSection.Toggle("Wallbang", AimbotSettings.Wallbang, function(v) AimbotSettings.Wallbang = v end)
+SilentAimSection.Toggle("Raycast", AimbotSettings.SilentAimMethods.Raycast, function(v) AimbotSettings.SilentAimMethods.Raycast = v end)
+SilentAimSection.Toggle("Cast", AimbotSettings.SilentAimMethods.Cast, function(v) AimbotSettings.SilentAimMethods.Cast = v end)
+SilentAimSection.Toggle("FindPartOnRay", AimbotSettings.SilentAimMethods.FindPartOnRay, function(v) AimbotSettings.SilentAimMethods.FindPartOnRay = v end)
+SilentAimSection.Toggle("FindPartOnRayWithIgnoreList", AimbotSettings.SilentAimMethods.FindPartOnRayWithIgnoreList, function(v) AimbotSettings.SilentAimMethods.FindPartOnRayWithIgnoreList = v end)
+SilentAimSection.Toggle("FindPartOnRayWithWhitelist", AimbotSettings.SilentAimMethods.FindPartOnRayWithWhitelist, function(v) AimbotSettings.SilentAimMethods.FindPartOnRayWithWhitelist = v end)
 SilentAimSection.Dropdown("Redirect", {"Head","Torso"}, function(v) AimbotSettings.SilentAimRedirect = v end)
 SilentAimSection.Slider("Hit Chance", {Min=0,Max=100,Default=AimbotSettings.SilentAimHitChance,Step=1}, function(v) AimbotSettings.SilentAimHitChance = v end)
 SilentAimSection.Dropdown("Lock Type", {"Closest Cursor","Closest Player"}, function(v)
